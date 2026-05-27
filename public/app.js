@@ -3,6 +3,7 @@ const state = {
   range: "",
   query: "",
   category: "",
+  source: "",
   district: ""
 };
 
@@ -15,6 +16,7 @@ const els = {
   refreshBtn: document.querySelector("#refreshBtn"),
   searchInput: document.querySelector("#searchInput"),
   categorySelect: document.querySelector("#categorySelect"),
+  sourceSelect: document.querySelector("#sourceSelect"),
   districtSelect: document.querySelector("#districtSelect"),
   eventGrid: document.querySelector("#eventGrid"),
   emptyState: document.querySelector("#emptyState"),
@@ -34,6 +36,10 @@ els.searchInput.addEventListener("input", (event) => {
 });
 els.categorySelect.addEventListener("change", (event) => {
   state.category = event.target.value;
+  renderEvents();
+});
+els.sourceSelect.addEventListener("change", (event) => {
+  state.source = event.target.value;
   renderEvents();
 });
 els.districtSelect.addEventListener("change", (event) => {
@@ -97,6 +103,7 @@ function renderStats(data) {
 
 function renderFilters() {
   fillSelect(els.categorySelect, "全部", unique(state.events.map((event) => event.category).filter(Boolean)));
+  fillSelect(els.sourceSelect, "全部来源", unique(state.events.map((event) => event.source).filter(Boolean)));
   fillSelect(els.districtSelect, "全深圳", unique(state.events.map((event) => event.district).filter(Boolean)));
 }
 
@@ -119,18 +126,25 @@ function renderBriefing() {
 function renderSourceHealth(sources) {
   els.sourceHealth.innerHTML = sources.map((source) => `
     <div class="source-item">
-      <strong>${source.ok ? "已连接" : "异常"} · ${escapeHtml(source.source)}</strong>
+      <strong><a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.source)}</a></strong>
       <span>${source.count} 条 · ${escapeHtml(source.note || "")}</span>
     </div>
   `).join("");
 }
 
 function renderEvents() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const filtered = state.events.filter((event) => {
+    const end = event.endDate || event.startDate;
+    if (end && new Date(end) < today) return false;
     const haystack = `${event.title} ${event.category} ${event.district} ${event.venue} ${event.source} ${event.summary}`.toLowerCase();
     if (state.query && !haystack.includes(state.query)) return false;
     if (state.category && event.category !== state.category) return false;
+    if (state.source && event.source !== state.source) return false;
     if (state.district && event.district !== state.district) return false;
+    if (state.range === "today" && event.urgency !== "今天") return false;
+    if (state.range === "tomorrow" && event.urgency !== "明天") return false;
     if (state.range === "week" && !["进行中", "今天", "明天", "本周"].includes(event.urgency)) return false;
     if (state.range === "free" && event.priceLabel !== "免费") return false;
     if (state.range === "official" && !event.sourceType.includes("official")) return false;
@@ -146,6 +160,8 @@ function renderEvents() {
 
 function eventCard(event, index) {
   const official = event.sourceType.includes("official");
+  const time = displayTime(event);
+  const venue = displayLabel(event.venue, event.district || "地点待定");
   return `
     <article class="event-card ${index < 3 ? "top" : ""}">
       <div class="event-media">${event.image ? `<img src="${escapeHtml(event.image)}" alt="" loading="lazy" onerror="this.remove()">` : ""}</div>
@@ -154,21 +170,37 @@ function eventCard(event, index) {
           <span class="chip hot">${escapeHtml(event.urgency)}</span>
           <span class="chip ${official ? "official" : ""}">${escapeHtml(event.confidence === "high" ? "高可信" : event.confidence === "medium" ? "需确认" : "线索")}</span>
           <span class="chip">${escapeHtml(event.category)}</span>
+          ${event.priceLabel === "免费" ? `<span class="chip free">免费</span>` : ""}
         </div>
         <h3>${escapeHtml(event.title)}</h3>
-        <p>${escapeHtml(event.summary)}</p>
-        <div class="event-facts">
-          <div><span>时间</span><strong>${escapeHtml(event.timeLabel || event.startDate || "见详情")}</strong></div>
-          <div><span>地点</span><strong>${escapeHtml(event.venue || event.district || "见详情")}</strong></div>
-          <div><span>来源</span><strong>${escapeHtml(event.source)}</strong></div>
-        </div>
+        <div class="event-line"><span class="line-icon">🕒</span> ${escapeHtml(time)}</div>
+        <div class="event-line"><span class="line-icon">📍</span> ${escapeHtml(venue)}</div>
+        <p class="event-summary">${escapeHtml(event.summary)}</p>
       </div>
       <div class="event-actions">
-        <button type="button" data-detail="${escapeHtml(event.id)}">核验</button>
-        <a href="${escapeHtml(event.url)}" target="_blank" rel="noreferrer">打开来源</a>
+        <a class="action-source" href="${escapeHtml(event.url || "#")}" target="_blank" rel="noreferrer">查看详情</a>
+        <a class="action-verify" href="${escapeHtml(event.url || "#")}" target="_blank" rel="noreferrer">来源 · ${escapeHtml(event.source)}</a>
       </div>
     </article>
   `;
+}
+
+function displayLabel(value, fallback) {
+  const v = (value || "").trim();
+  if (!v || v.includes("见详情") || v.includes("见原文") || v.includes("见下方详情")) return fallback;
+  return v;
+}
+
+function displayTime(event) {
+  const label = displayLabel(event.timeLabel, "");
+  if (label) return label;
+  if (event.startDate) {
+    const s = event.startDate;
+    const e = event.endDate;
+    if (e && e !== s) return `${s} ~ ${e}`;
+    return s;
+  }
+  return "时间待定";
 }
 
 function openDetail(id) {

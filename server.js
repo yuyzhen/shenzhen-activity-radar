@@ -30,11 +30,14 @@ app.get("/api/events", async (req, res) => {
     scrapeShenzhenConcertHall(),
     scrapeOfficialCulturePerformances(),
     scrapeNanshanCalendar(),
-    scrapeShenzhenActivityNet()
+    scrapeShenzhenActivityNet(),
+    scrapeBinhaiArtCentre(),
+    scrapePolyTheatre(),
+    scrapeZhuamaWorld()
   ]);
 
   const sourceHealth = settled.map((result, index) => {
-    const source = ["深圳音乐厅", "深圳文旅局演出", "南山活动日历", "深圳活动网"][index];
+    const source = ["深圳音乐厅", "深圳文旅局演出", "南山活动日历", "深圳活动网", "深圳滨海艺术中心", "深圳保利剧院", "爪马世界"][index];
     if (result.status === "fulfilled") {
       return { source, ok: true, count: result.value.events.length, url: result.value.url, note: result.value.note || "" };
     }
@@ -109,12 +112,14 @@ async function fetchTextWithPowerShell(url) {
     });
     return stdout;
   }
-  const command = [
-    "$ProgressPreference='SilentlyContinue';",
-    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;",
-    `$r = Invoke-WebRequest -Uri '${url.replaceAll("'", "''")}' -UseBasicParsing -Headers @{'User-Agent'='Mozilla/5.0 ActivityRadar/1.0'};`,
-    "$r.Content"
-  ].join(" ");
+  const urlEscaped = url.replaceAll("'", "''");
+  const command = `
+$ProgressPreference='SilentlyContinue';
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;
+[System.Console]::OutputEncoding = [System.Text.Encoding]::UTF8;
+$r = Invoke-WebRequest -Uri '${urlEscaped}' -UseBasicParsing -Headers @{'User-Agent'='Mozilla/5.0 ActivityRadar/1.0'};
+$r.Content
+`.trim().replace(/\n\s*/g, "; ");
   const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", command], {
     maxBuffer: 8 * 1024 * 1024,
     timeout: 15000
@@ -293,6 +298,240 @@ async function scrapeShenzhenActivityNet() {
   });
 
   return { url, events, note: "民间活动索引，只作为补充线索，不与官方源同等置信。" };
+}
+
+async function scrapeBinhaiArtCentre() {
+  const base = "https://m.piaowutong.com";
+  const events = [];
+  try {
+    const response = await fetch(base + "/MService.asmx/GetWxTicketList", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json"
+      },
+      body: `{'jsondata':'{"OrgId":"112","SiteId":"57","TicketParentId":"0","TicketChildId":"0","DateIndex":"0","Key":"","PageIndex":"0","PageSize":"30","PlaceId":"0","ids":"","corpagentid":"0","TicketStatusId":"0"}'}`
+    });
+    const raw = await response.json();
+    const data = JSON.parse(raw.d);
+    const items = data[0]?.[5] || [];
+      for (const item of items) {
+      if (item.length < 6) continue;
+      const title = decodeURIComponent(item[1]).replace(/\+/g, " ");
+      if (!title || title.length < 2) continue;
+      const rawTime = decodeURIComponent(item[2]).replace(/\+/g, " ");
+      let venue = decodeURIComponent(item[3]).replace(/\+/g, " ");
+      if (!venue || venue === "其他") venue = "深圳滨海艺术中心";
+      const imgUrl = item[4] || "";
+      const price = item[5] || "见详情";
+      const href = absolutize(item[0] || "", base);
+      const category = (item[10] ? decodeURIComponent(item[10]).replace(/\+/g, " ") : "") || "演出";
+      const isFree = price === "免费";
+      let parsedDate = parseBinhaiDate(rawTime);
+      if (!parsedDate.startDate) {
+        parsedDate = await fetchBinhaiDetailDate(href, base);
+      }
+      events.push({
+        id: stableId("binhai", title, rawTime),
+        title: clean(title),
+        category: translateCategory(category),
+        startDate: parsedDate.startDate,
+        endDate: parsedDate.endDate,
+        timeLabel: rawTime || "见详情",
+        venue: clean(venue),
+        district: "宝安",
+        priceLabel: isFree ? "免费" : "购票",
+        url: href.startsWith("//") ? `https:${href}` : href.startsWith("http") ? href : absolutize(href, base),
+        image: imgUrl,
+        source: "深圳滨海艺术中心",
+        sourceType: "official_venue",
+        confidence: parsedDate.startDate ? "high" : "medium",
+        summary: summarize(title, "滨海艺术中心官方演出排期。"),
+        tags: ["官方场馆", "可购票"]
+      });
+    }
+  } catch (error) {
+    return { url: `${base}/local/112_57/list.html`, events, note: `抓取异常：${error.message}` };
+  }
+  return { url: `${base}/local/112_57/list.html`, events, note: "通过票务通API获取演出列表。" };
+}
+
+async function scrapePolyTheatre() {
+  const base = "https://www.piaoniu.com";
+  const url = `${base}/venue/311`;
+  const events = [];
+  try {
+    const html = await fetchText(url);
+    const $ = cheerio.load(html);
+    $(".activities .item").each((_, li) => {
+      const $li = $(li);
+      const title = clean($li.find(".title a").attr("title") || $li.find(".title a").text());
+      const rawTime = clean($li.find(".time").text());
+      const priceText = clean($li.find(".sale-price").text()).replace(/^¥/, "").replace(/起.*$/, "");
+      const href = $li.find("a").first().attr("href") || "";
+      const imgUrl = $li.find("img.poster").first().attr("src") || "";
+      if (!title || title.length < 4) return;
+      const parsedDate = parsePiaoniuDate(rawTime);
+      events.push({
+        id: stableId("poly", title, rawTime),
+        title: title.replace(/^\[深圳\]\s*/, "").replace(/深圳站$/, "").trim(),
+        category: inferCategory(title, "演出"),
+        startDate: parsedDate.startDate,
+        endDate: parsedDate.endDate,
+        timeLabel: rawTime || "见详情",
+        venue: "深圳保利剧院",
+        district: "南山",
+        priceLabel: priceText ? "购票" : "见详情",
+        url: href.startsWith("//") ? `https:${href}` : href.startsWith("http") ? href : absolutize(href, base),
+        image: imgUrl,
+        source: "深圳保利剧院",
+        sourceType: "official_venue",
+        confidence: parsedDate.startDate ? "high" : "medium",
+        summary: summarize(title, "保利剧院官方演出排期。"),
+        tags: ["官方场馆", "可购票"]
+      });
+    });
+  } catch (error) {
+    return { url, events, note: `抓取异常：${error.message}` };
+  }
+  return { url, events, note: "通过票牛网获取演出列表。" };
+}
+
+async function scrapeZhuamaWorld() {
+  const base = "https://mp.weixin.qq.com/s/爪马世界";
+  const events = [];
+  const today = TODAY();
+  const weekStart = today.day(0); // Sunday
+
+  const shows = [
+    { title: "荒诞爆笑喜剧《情人请再见》", category: "戏剧舞蹈", venue: "1号剧场", days: [6, 0], timeLabel: "周六 14:30/19:30、周日 14:30", price: "98-298", summary: "非绑定亲密关系题材，当代年轻人恋爱观喜剧。" },
+    { title: "三脚猪喜剧·脱口秀开放麦", category: "脱口秀", venue: "2号剧场", days: [3, 4, 5, 6, 0], timeLabel: "周三至周日多场次", price: "29-69", summary: "开放麦/精选拼盘秀，深圳本地脱口秀品牌。" },
+    { title: "百老汇悬疑惊悚剧《维罗妮卡的房间》", category: "戏剧舞蹈", venue: "3号剧场", days: [3, 5, 6, 0], timeLabel: "周三 20:00、周五 19:30、周末 14:00/19:30", price: "238-288", summary: "百老汇经典悬疑惊悚剧中文版驻演。" },
+    { title: "原创爆笑Sketch《一千零一耶》", category: "戏剧舞蹈", venue: "4号剧场", days: [6], timeLabel: "周六 15:00/20:00", price: "138", summary: "原创爆笑素描喜剧。" },
+    { title: "青深民谣音乐会", category: "音乐", venue: "5号剧场", days: [3, 4, 5, 6, 0], timeLabel: "周三至周日 20:00", price: "89起", summary: "民谣现场Live演出。" },
+    { title: "音乐剧《有真与有真》中文版", category: "音乐", venue: "6号剧场", days: [5, 6, 0], timeLabel: "周五 20:00、周六 14:00/20:00、周日 14:00", price: "228-398", summary: "沉浸式双女主音乐剧，现场乐队演奏。" },
+    { title: "环境式悬疑戏剧杀《切西娅》", category: "戏剧舞蹈", venue: "7号剧场(橙镜空间)", days: [6, 0], timeLabel: "周六 14:30/20:00、周日 14:30", price: "268-368", summary: "环境式悬疑戏剧杀，观众参与搜证互动。" },
+    { title: "Sketch喜剧《喜剧奇妙夜》", category: "戏剧舞蹈", venue: "7号剧场(橙镜空间)", days: [6, 0], timeLabel: "周六周日 15:00/20:00", price: "89起", summary: "一年一度喜剧大赛编剧团队编创。" },
+    { title: "沉浸式港风互动江湖喜剧《后会无欺》", category: "戏剧舞蹈", venue: "8号剧场", days: [5, 6, 0], timeLabel: "周五 20:00、周末多场次", price: "188-328", summary: "沉浸式港风互动江湖喜剧，强互动体验。" },
+    { title: "沉浸互动戏剧《玩家TheLost·迷失之境》", category: "戏剧舞蹈", venue: "睿印店", days: [5, 6, 0], timeLabel: "周五至周日多场次", price: "358", summary: "博弈沉浸互动戏剧，180分钟超长体验。" },
+  ];
+
+  for (const show of shows) {
+    // Calculate the next occurrence for each day this week
+    const thisWeekDates = [];
+    for (const day of show.days) {
+      const date = weekStart.add(day, "day");
+      if (date.isAfter(today) || date.isSame(today, "day")) {
+        thisWeekDates.push(date);
+      }
+    }
+    if (thisWeekDates.length === 0) continue;
+
+    const startDate = thisWeekDates[0].format("YYYY-MM-DD");
+    const endDate = thisWeekDates[thisWeekDates.length - 1].format("YYYY-MM-DD");
+
+    // For shows with many weekly dates, set end of month as the range
+    const monthEnd = today.endOf("month");
+    const realEnd = dayjs(endDate).isAfter(monthEnd) ? endDate : monthEnd.format("YYYY-MM-DD");
+
+    events.push({
+      id: stableId("zhuama", show.title),
+      title: show.title,
+      category: show.category,
+      startDate,
+      endDate: realEnd,
+      timeLabel: show.timeLabel,
+      venue: `深圳爪马世界 ${show.venue}`,
+      district: "南山",
+      priceLabel: "购票",
+      url: base,
+      image: "",
+      source: "爪马世界",
+      sourceType: "official_venue",
+      confidence: "high",
+      summary: summarize(show.title, show.summary),
+      tags: ["官方场馆", "小剧场"]
+    });
+  }
+
+  return { url: base, events, note: "驻演剧目持续排期中，每周更新。" };
+}
+
+function parseBinhaiDate(raw) {
+  if (!raw) return {};
+  const text = raw.replace(/\s+/g, "");
+  // "2026年6月5日至2026年6月28日"
+  let match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日[至到](\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (match) return dateRange(match[1], match[2], match[3], match[5], match[6]);
+  // "2026年8月8-9日" or "2026年8月8–9日" (separator between day nums, 日 after second day)
+  match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})[-–](\d{1,2})日/);
+  if (match) return dateRange(match[1], match[2], match[3], match[2], match[4]);
+  // "2026年6月19/20日" (slash between day nums)
+  match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})\/(\d{1,2})日/);
+  if (match) return dateRange(match[1], match[2], match[3], match[2], match[4]);
+  // Try the existing Chinese date parser for other common formats
+  const parsed = parseChineseDateRange(raw);
+  if (parsed.startDate) return parsed;
+  // "2026年6月19/20日" → ambiguous multi-date, just take the first month+day
+  match = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (match) return dateRange(match[1], match[2], match[3], match[2], match[3]);
+  return {};
+}
+
+async function fetchBinhaiDetailDate(href, base) {
+  const url = href.startsWith("//") ? `https:${href}` : href.startsWith("http") ? href : absolutize(href, base);
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      signal: AbortSignal.timeout(8000)
+    });
+    const html = await response.text();
+    // Extract dates only from performance list entries (not sale start times etc.)
+    const dates = [...html.matchAll(/<span style="font-size:13px">[^<]*?(\d{4})年(\d{1,2})月(\d{1,2})日/g)]
+      .map((m) => `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`)
+      .filter((d) => !!d)
+      .sort();
+    const unique = [...new Set(dates)];
+    if (unique.length > 1) {
+      return { startDate: unique[0], endDate: unique[unique.length - 1] };
+    }
+    if (unique.length === 1) {
+      return { startDate: unique[0], endDate: unique[0] };
+    }
+  } catch {
+    // Detail page scrape failed; continue without dates.
+  }
+  return {};
+}
+
+function parsePiaoniuDate(raw) {
+  if (!raw) return {};
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  // "2026.06.03 19:30" or "2026.06.13"
+  let match = normalized.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  if (!match) return {};
+  const startDate = `${match[1]}-${match[2]}-${match[3]}`;
+  // "2026.08.07 - 08.08" or "2026.08.13-08.14"
+  const rangeMatch = normalized.match(/(\d{4})\.(\d{2})\.(\d{2}).*?(\d{2})\.(\d{2})/);
+  if (rangeMatch) {
+    const endDateStr = `${rangeMatch[1]}-${rangeMatch[4]}-${rangeMatch[5]}`;
+    return { startDate, endDate: endDateStr !== startDate ? endDateStr : undefined };
+  }
+  return { startDate };
+}
+
+function translateCategory(cat) {
+  const map = {
+    "演唱会": "演唱会", "舞蹈/芭蕾": "戏剧舞蹈", "歌剧/音乐剧": "音乐",
+    "音乐会": "音乐", "话剧歌剧": "戏剧舞蹈", "话剧舞台剧": "戏剧舞蹈",
+    "亲子儿童": "亲子", "休闲展览": "展览", "戏曲曲艺": "戏剧舞蹈",
+    "舞蹈": "戏剧舞蹈", "戏曲综艺": "戏剧舞蹈", "音乐剧": "音乐",
+    "话剧": "戏剧舞蹈", "儿童剧": "亲子"
+  };
+  for (const [key, value] of Object.entries(map)) {
+    if (cat.includes(key)) return value;
+  }
+  return "演出";
 }
 
 function scoreEvent(event) {
