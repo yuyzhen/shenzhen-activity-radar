@@ -81,7 +81,7 @@ async function fetchData(force) {
   } catch {
     // Static GitHub Pages build has no Express API; fall back to generated data.
   }
-  const staticUrl = `/data/events.json${force ? `?t=${Date.now()}` : ""}`;
+  const staticUrl = `data/events.json${force ? `?t=${Date.now()}` : ""}`;
   const response = await fetch(staticUrl);
   if (!response.ok) throw new Error(`数据文件不可用：${response.status}`);
   return response;
