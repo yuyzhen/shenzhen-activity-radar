@@ -420,6 +420,7 @@ select {
 }
 
 dialog {
+  position: relative;
   width: min(680px, calc(100vw - 32px));
   border: 1px solid var(--line);
   padding: 0;
@@ -461,7 +462,9 @@ dialog::backdrop {
   .briefing {
     position: static;
   }
+}
 
+@media (max-width: 860px) {
   .event-grid {
     grid-template-columns: 1fr;
   }

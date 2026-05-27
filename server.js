@@ -13,6 +13,8 @@ const PORT = Number(process.env.PORT || 5178);
 const TZ_LABEL = "Asia/Shanghai";
 const TODAY = () => dayjs().startOf("day");
 const CACHE_TTL_MS = 12 * 60 * 1000;
+const SCRAPER_NAMES = Object.freeze(["深圳音乐厅", "深圳文旅局演出", "南山活动日历", "深圳活动网", "深圳滨海艺术中心", "深圳保利剧院", "爪马世界"]);
+const SCRAPER_FNS = Object.freeze([scrapeShenzhenConcertHall, scrapeOfficialCulturePerformances, scrapeNanshanCalendar, scrapeShenzhenActivityNet, scrapeBinhaiArtCentre, scrapePolyTheatre, scrapeZhuamaWorld]);
 
 let cache = null;
 let cacheAt = 0;
@@ -26,18 +28,10 @@ app.get("/api/events", async (req, res) => {
   }
 
   const started = new Date();
-  const settled = await Promise.allSettled([
-    scrapeShenzhenConcertHall(),
-    scrapeOfficialCulturePerformances(),
-    scrapeNanshanCalendar(),
-    scrapeShenzhenActivityNet(),
-    scrapeBinhaiArtCentre(),
-    scrapePolyTheatre(),
-    scrapeZhuamaWorld()
-  ]);
+  const settled = await Promise.allSettled(SCRAPER_FNS.map((fn) => fn()));
 
   const sourceHealth = settled.map((result, index) => {
-    const source = ["深圳音乐厅", "深圳文旅局演出", "南山活动日历", "深圳活动网", "深圳滨海艺术中心", "深圳保利剧院", "爪马世界"][index];
+    const source = SCRAPER_NAMES[index];
     if (result.status === "fulfilled") {
       return { source, ok: true, count: result.value.events.length, url: result.value.url, note: result.value.note || "" };
     }
@@ -398,7 +392,7 @@ async function scrapePolyTheatre() {
 }
 
 async function scrapeZhuamaWorld() {
-  const base = "https://mp.weixin.qq.com/s/爪马世界";
+  const base = "https://redhotmedia.com.cn";
   const events = [];
   const today = TODAY();
   const weekStart = today.day(0); // Sunday
@@ -430,9 +424,7 @@ async function scrapeZhuamaWorld() {
     const startDate = thisWeekDates[0].format("YYYY-MM-DD");
     const endDate = thisWeekDates[thisWeekDates.length - 1].format("YYYY-MM-DD");
 
-    // For shows with many weekly dates, set end of month as the range
-    const monthEnd = today.endOf("month");
-    const realEnd = dayjs(endDate).isAfter(monthEnd) ? endDate : monthEnd.format("YYYY-MM-DD");
+    const realEnd = endDate;
 
     events.push({
       id: stableId("zhuama", show.title),
@@ -444,7 +436,7 @@ async function scrapeZhuamaWorld() {
       venue: `深圳爪马世界 ${show.venue}`,
       district: "南山",
       priceLabel: "购票",
-      url: base,
+      url: "https://redhotmedia.com.cn/ticket/ticket_list_%E6%B7%B1%E5%9C%B3__4.html",
       image: "",
       source: "爪马世界",
       sourceType: "official_venue",
@@ -454,7 +446,7 @@ async function scrapeZhuamaWorld() {
     });
   }
 
-  return { url: base, events, note: "驻演剧目持续排期中，每周更新。" };
+  return { url: "https://redhotmedia.com.cn/ticket/ticket_list_%E6%B7%B1%E5%9C%B3__4.html", events, note: "驻演剧目持续排期中，每周更新。" };
 }
 
 function parseBinhaiDate(raw) {
@@ -656,7 +648,7 @@ function inferVenue(text) {
 }
 
 function isCommercialNoise(title) {
-  const noiseWords = ["眼镜", "镜片", "配镜", "视力筛查", "优惠配镜", "工厂直营"];
+  const noiseWords = ["眼镜", "镜片", "配镜", "视力筛查", "优惠配镜", "工厂直营", "植发", "脱发", "医美", "祛斑", "体检", "贷款", "理财", "保险", "房产"];
   return noiseWords.some((word) => title.includes(word));
 }
 

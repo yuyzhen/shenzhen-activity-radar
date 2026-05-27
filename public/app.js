@@ -191,14 +191,20 @@ function displayLabel(value, fallback) {
   return v;
 }
 
+function formatDate(iso) {
+  const parts = (iso || "").split("-");
+  if (parts.length !== 3) return iso || "";
+  return `${parseInt(parts[1])}月${parseInt(parts[2])}日`;
+}
+
 function displayTime(event) {
   const label = displayLabel(event.timeLabel, "");
   if (label) return label;
   if (event.startDate) {
     const s = event.startDate;
     const e = event.endDate;
-    if (e && e !== s) return `${s} ~ ${e}`;
-    return s;
+    if (e && e !== s) return `${formatDate(s)} 至 ${formatDate(e)}`;
+    return formatDate(s);
   }
   return "时间待定";
 }
