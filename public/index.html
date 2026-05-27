@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>深圳活动雷达</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Shenzhen Live Intel</p>
+          <h1>深圳活动雷达</h1>
+          <p class="subtitle">聚合官方场馆、政府文旅和本地活动线索，把“今天到近期值得关注的事”放在一个界面里。</p>
+        </div>
+        <div class="status-card">
+          <div class="status-top">
+            <span class="pulse"></span>
+            <span id="freshness">正在同步</span>
+          </div>
+          <strong id="totalCount">--</strong>
+          <span>条可关注事项</span>
+          <button id="refreshBtn" type="button">刷新情报</button>
+        </div>
+      </section>
+
+      <section class="control-band">
+        <div class="metric">
+          <span>官方来源</span>
+          <strong id="officialCount">--</strong>
+        </div>
+        <div class="metric">
+          <span>本周可去</span>
+          <strong id="weekCount">--</strong>
+        </div>
+        <div class="metric">
+          <span>免费线索</span>
+          <strong id="freeCount">--</strong>
+        </div>
+        <label class="search">
+          <span>搜索</span>
+          <input id="searchInput" type="search" placeholder="音乐厅 / 展览 / 南山 / 免费" />
+        </label>
+        <label class="select">
+          <span>分类</span>
+          <select id="categorySelect">
+            <option value="">全部</option>
+          </select>
+        </label>
+        <label class="select">
+          <span>区域</span>
+          <select id="districtSelect">
+            <option value="">全深圳</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="layout">
+        <aside class="briefing">
+          <h2>今日判断</h2>
+          <div id="briefingList" class="briefing-list"></div>
+          <h2>来源健康</h2>
+          <div id="sourceHealth" class="source-list"></div>
+        </aside>
+
+        <section>
+          <div class="section-head">
+            <div>
+              <h2>值得关注</h2>
+              <p>按时间、来源可信度和临近程度排序。</p>
+            </div>
+            <div class="segmented" role="tablist">
+              <button class="active" data-range="">全部</button>
+              <button data-range="week">本周</button>
+              <button data-range="free">免费</button>
+              <button data-range="official">官方</button>
+            </div>
+          </div>
+          <div id="eventGrid" class="event-grid"></div>
+          <div id="emptyState" class="empty-state" hidden>没有匹配的活动。换个筛选或点“刷新情报”。</div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="detailDialog">
+      <button class="dialog-close" type="button" aria-label="关闭">×</button>
+      <div id="dialogContent"></div>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

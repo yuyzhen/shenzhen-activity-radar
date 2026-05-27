@@ -1,0 +1,4 @@
+node_modules/
+desktop-check*.png
+mobile-check*.png
+.env

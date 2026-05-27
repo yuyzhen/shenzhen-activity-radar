@@ -1,0 +1,20 @@
+{
+  "name": "shenzhen-activity-radar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build:data": "node scripts/build-static-data.js",
+    "check": "node --check server.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "dayjs": "^1.11.13",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}
